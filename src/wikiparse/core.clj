@@ -128,7 +128,7 @@
         }])))
 
 (defn es-format-pages
-  [pages index-name]
+  [index-name pages]
   (r/map (es-page-formatter-for index-name) pages))
 
 (defn phase-filter
@@ -153,7 +153,7 @@
       (println resp))))
 
 (defn index-pages
-  [bulk-lines conn callback]
+  [conn callback bulk-lines]
   (bulk-index-pages conn bulk-lines)
   (callback bulk-lines))
 
@@ -229,6 +229,19 @@
   (.getAndAdd stream-processed (count chunk))
   chunk)
 
+(defn dump-pages
+  [rdr formatter dumper phase batch-size] ; 'dumper' here could be index-pages
+  (dorun (pmap (fn [elems]
+                (-> elems
+                    (count-stream-elems)
+                    (xml->pages)
+                    (filter-pages phase)
+                    formatter
+                    (r/flatten)
+                    (r/foldcat)
+                    dumper))
+              (partition-all batch-size (:content (xml/parse rdr))))))
+
 (defn index-dump
   [rdr conn callback phase index-name batch-size]
   ;; Get a reader for the bz2 file
@@ -296,28 +309,40 @@
                  :id script-id
                  ))
 
+(defn write-pages
+  "Write pages out to file"
+  [file callback pages]
+  (with-open [file (io/writer file :append true)]
+    (pp/pprint pages file)
+    (callback pages)))
 
 (defn -main
   [& args]
   (let [[opts path] (parse-cmdline args)]
-    (with-connection (:es opts) conn
+    ; This should probably be abstracted behind some "initialization" function
+    ; though I'm not entirely certain how I want to do that yet.
+    #_(with-connection (:es opts) conn
                      (ensure-index conn (:index opts))
-                     (create-update-script conn (:index opts))
-                     (doseq [phase (map keyword (string/split (:phases opts) #","))]
-                       (let [stats (swap! phase-stats (fn [_] (new-phase-stats phase)))
-                             batch-size (Integer/parseInt (:batch opts))
-                             callback (make-callback stats)
-                             runner (fn [rdr]
-                                      (println "Starting phase:" phase)
-                                      (println "Batch size:" (:batch opts))
-                                      (dorun
-                                        (index-dump rdr conn callback phase (:index opts) batch-size)))]
-                         (.set stream-processed 0)
-                         (if path
-                           (with-open [rdr (bz2-reader path)] (runner rdr))
-                           (runner *in*))
-                         (print-phase-stats stats)
-                         (println "Completed phase:" phase)
-                         ))
-                     ))
+                     (create-update-script conn (:index opts)))
+    (doseq [phase (map keyword (string/split (:phases opts) #","))]
+      (let [stats (swap! phase-stats (fn [_] (new-phase-stats phase)))
+            batch-size (Integer/parseInt (:batch opts))
+            callback (make-callback stats)
+                                        ;formatter (partial es-format-pages (:index opts))
+            formatter identity
+            dumper (partial write-pages "parsed.edn" callback)
+            runner (fn [rdr]
+                     (println "Starting phase:" phase)
+                     (println "Batch size:" (:batch opts))
+                     (dorun
+                      (dump-pages rdr formatter dumper phase batch-size)
+                      #_(index-dump rdr conn callback phase (:index opts) batch-size)
+                      ))]
+        (.set stream-processed 0)
+        (if path
+          (with-open [rdr (bz2-reader path)] (runner rdr))
+          (runner *in*))
+        (print-phase-stats stats)
+        (println "Completed phase:" phase)
+        )))
   (System/exit 0))
