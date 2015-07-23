@@ -33,6 +33,8 @@
                              ctx._source.body = body;
                            };")
 
+(def phase-stats (atom {}))
+
 (defn connect!
   "Connect once to the ES cluster"
   [es]
@@ -250,20 +252,6 @@
                     dumper))
               (partition-all batch-size (:content (xml/parse rdr))))))
 
-(defn index-dump
-  [rdr conn callback phase index-name batch-size]
-  ;; Get a reader for the bz2 file
-  (dorun (pmap (fn [elems]
-                (-> elems
-                    (count-stream-elems)
-                    (xml->pages)
-                    (filter-pages phase)
-                    (es-format-pages index-name)
-                    (r/flatten)
-                    (r/foldcat)
-                    (index-pages conn callback)))
-              (partition-all batch-size (:content (xml/parse rdr))))))
-
 (defn parse-cmdline
   [args]
   (let [[opts args banner]
@@ -286,8 +274,6 @@
    :start (System/currentTimeMillis)
    :processed (AtomicLong.)
    })
-
-(def phase-stats (atom {}))
 
 (defn print-phase-stats
   [{:keys [start processed name] :as stats}]
@@ -339,13 +325,13 @@
             #_formatter #_(partial es-format-pages (:index opts))
             #_formatter #_(r/map #(strip-text % 20))
             formatter identity
+            #_dumper #_(partial index-pages conn callback)
             dumper (partial write-pages "parsed.edn" callback)
             runner (fn [rdr]
                      (println "Starting phase:" phase)
                      (println "Batch size:" (:batch opts))
                      (dorun
                       (dump-pages rdr formatter dumper phase batch-size)
-                      #_(index-dump rdr conn callback phase (:index opts) batch-size)
                       ))]
         (.set stream-processed 0)
         (if path
