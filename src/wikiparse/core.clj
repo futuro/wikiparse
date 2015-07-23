@@ -1,6 +1,8 @@
 (ns wikiparse.core
   (:require [clojure.data.xml :as xml]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.core.incubator :as incu]
             [clojure.string :as string]
             [clojure.tools.cli :as cli]
             [clojure.core.reducers :as r]
@@ -130,6 +132,12 @@
 (defn es-format-pages
   [index-name pages]
   (r/map (es-page-formatter-for index-name) pages))
+
+(defn strip-text
+  [page max]
+  (if (> (get-in page [:revision :text]) max)
+    (incu/dissoc-in page [:revision :text])
+    page))
 
 (defn phase-filter
   [phase]
@@ -328,7 +336,8 @@
       (let [stats (swap! phase-stats (fn [_] (new-phase-stats phase)))
             batch-size (Integer/parseInt (:batch opts))
             callback (make-callback stats)
-                                        ;formatter (partial es-format-pages (:index opts))
+            #_formatter #_(partial es-format-pages (:index opts))
+            #_formatter #_(r/map #(strip-text % 20))
             formatter identity
             dumper (partial write-pages "parsed.edn" callback)
             runner (fn [rdr]
