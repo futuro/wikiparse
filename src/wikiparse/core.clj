@@ -59,7 +59,8 @@
 
 (defn elem->map
   "Turns a list of elements into a map keyed by tag name. This doesn't
-   work so well if tag names are repeated"
+  work so well if tag names are repeated"
+  ; TODO: tag names should probably be put into a collection (list?)
   [mappers]
   (fn [elems]
     (reduce (fn [m elem]
@@ -288,7 +289,7 @@
                      elapsed-secs
                      rate))))
 
-(defn make-callback
+(defn make-stats-reporter
   [{:keys [start processed]  :as stats}]
   (fn [bulk-lines]
     (let [processed-items (/ (count bulk-lines) 2)]
@@ -310,34 +311,40 @@
     (pp/pprint pages file)
     (callback pages)))
 
+(defn parse
+  [path phases batch-size formatter dumper]
+  (doseq [phase phases]
+    (let [stats (swap! phase-stats (fn [_] (new-phase-stats phase)))
+          reporter (make-stats-reporter stats)
+          dumper (partial dumper reporter)
+          runner (fn [rdr]
+                   (println "Starting phase:" phase)
+                   (println "Batch size:" (str batch-size))
+                   (dorun
+                    (dump-pages rdr formatter dumper phase batch-size)
+                    ))]
+      (.set stream-processed 0)
+      (if path
+        (with-open [rdr (bz2-reader path)] (runner rdr))
+        (runner *in*))
+      (print-phase-stats stats)
+      (println "Completed phase:" phase)
+      )))
+
+(defn get-phases
+  [opts]
+  (map keyword (string/split (:phases opts) #",")))
+
 (defn -main
   [& args]
   (let [[opts path] (parse-cmdline args)]
-    ; This should probably be abstracted behind some "initialization" function
-    ; though I'm not entirely certain how I want to do that yet.
+    ; This should be handled with components instead (most likely)
     #_(with-connection (:es opts) conn
-                     (ensure-index conn (:index opts))
-                     (create-update-script conn (:index opts)))
-    (doseq [phase (map keyword (string/split (:phases opts) #","))]
-      (let [stats (swap! phase-stats (fn [_] (new-phase-stats phase)))
-            batch-size (Integer/parseInt (:batch opts))
-            callback (make-callback stats)
-            #_formatter #_(partial es-format-pages (:index opts))
-            #_formatter #_(r/map #(strip-text % 20))
-            formatter identity
-            #_dumper #_(partial index-pages conn callback)
-            dumper (partial write-pages "parsed.edn" callback)
-            runner (fn [rdr]
-                     (println "Starting phase:" phase)
-                     (println "Batch size:" (:batch opts))
-                     (dorun
-                      (dump-pages rdr formatter dumper phase batch-size)
-                      ))]
-        (.set stream-processed 0)
-        (if path
-          (with-open [rdr (bz2-reader path)] (runner rdr))
-          (runner *in*))
-        (print-phase-stats stats)
-        (println "Completed phase:" phase)
-        )))
+        (ensure-index conn (:index opts))
+        (create-update-script conn (:index opts)))
+    (parse path
+           (get-phases opts)
+           (Integer/parseInt (:batch opts))
+           identity
+           (partial write-pages "parsed.edn")))
   (System/exit 0))
