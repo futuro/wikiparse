@@ -49,6 +49,34 @@
   `(let [~bind (connect! ~es)]
      ~@body))
 
+(defn flattr
+  [separator pre themap]
+  (map
+   (fn [[k v]]
+     (let [prefix (if (and (not (empty? pre)) pre)
+                    (str pre separator (name k))
+                    (name k))]
+       (if (map? v)
+         (flattr separator prefix v)
+         {(keyword prefix) v})))
+   themap))
+
+;; Adapted from
+;; https://stackoverflow.com/questions/17901933/flattening-a-map-by-join-the-keys
+(defn flatten-map
+  ([nested-map separator]
+   (flatten-map nested-map separator nil))
+  ([nested-map separator pre]
+   #_(apply merge
+          (r/foldcat
+           (r/flatten
+            (r/mapcat
+             (partial flattr separator pre)
+             nested-map))))
+   (map
+    #(apply merge (flatten (flattr separator pre %)))
+    nested-map)))
+
 (defn bz2-reader
   "Returns a streaming Reader for the given compressed BZip2
   file. Use within (with-open)."
@@ -137,8 +165,8 @@
   (r/map (es-page-formatter-for index-name) pages))
 
 (defn strip-text
-  [page max]
-  (if (> (get-in page [:revision :text]) max)
+  [max page]
+  (if (> (count (get-in page [:revision :text])) max)
     (incu/dissoc-in page [:revision :text])
     page))
 
@@ -241,7 +269,7 @@
   chunk)
 
 (defn dump-pages
-  [rdr formatter dumper phase batch-size] ; 'dumper' here could be index-pages
+  [rdr formatter dumper phase batch-size]
   (dorun (pmap (fn [elems]
                 (-> elems
                     (count-stream-elems)
