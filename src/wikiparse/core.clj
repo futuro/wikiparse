@@ -10,7 +10,9 @@
             [clojurewerkz.elastisch.rest :as esr]
             [clojurewerkz.elastisch.rest.document :as es-doc]
             [clojurewerkz.elastisch.rest.index :as es-index]
-            [clojurewerkz.elastisch.rest.bulk :as es-bulk])
+            [clojurewerkz.elastisch.rest.bulk :as es-bulk]
+            [clj-time [core :as t] [format :as tf] [coerce :as tc]]
+            [wikiparse.db :as db])
   (:import (org.apache.commons.compress.compressors.bzip2 BZip2CompressorInputStream)
            (java.util.concurrent.atomic AtomicLong))
   (:gen-class))
@@ -107,12 +109,17 @@
   (fn [{attrs :attrs}]
     (get attrs attr)))
 
+(defn to-timestamp
+  [timestr]
+  (let [formatter (tf/formatters :date-time-no-ms)]
+    (tc/to-timestamp (tf/parse formatter timestr))))
+
 (def revision-mapper
   (comp 
    (elem->map 
     {:text text-mapper
-     :timestamp text-mapper
-     :format (comp keyword text-mapper)})
+     :timestamp (comp to-timestamp text-mapper)
+     :format text-mapper})
    :content))
 
 (def page-mappers
@@ -275,9 +282,9 @@
                     (count-stream-elems)
                     (xml->pages)
                     (filter-pages phase)
-                    formatter
                     (r/flatten)
                     (r/foldcat)
+                    formatter
                     dumper))
               (partition-all batch-size (:content (xml/parse rdr))))))
 
@@ -373,6 +380,6 @@
     (parse path
            (get-phases opts)
            (Integer/parseInt (:batch opts))
-           identity
+           #(flatten-map % "-")
            (partial write-pages "parsed.edn")))
   (System/exit 0))

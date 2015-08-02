@@ -13,4 +13,8 @@
                  [org.clojure/tools.cli "0.2.4"]
                  [clojurewerkz/elastisch "2.2.0-beta3"]
                  [org.apache.commons/commons-compress "1.9"]
-                 [org.postgresql/postgresql "9.4-1201-jdbc41"]])
+                 [org.postgresql/postgresql "9.4-1201-jdbc41"]
+                 [honeysql "0.6.1"]
+                 [korma "0.4.2"]
+                 [clj-time "0.10.0"]])
+
